@@ -1,6 +1,5 @@
 package net.floodlightcontroller.traceroute;
 
-import java.util.HashSet;
 import java.util.Set;
 
 public class swInfo {
@@ -12,7 +11,7 @@ public class swInfo {
 	{
 		DPID = dpid;
 		COLOR = color;
-		NEIGHBORS = neighbors;// = new HashSet<Long>();
+		NEIGHBORS = neighbors;
 	}
 	public Long getDPID()
 	{
@@ -25,11 +24,5 @@ public class swInfo {
 	public Set<Long> getNeighbors()
 	{
 		return NEIGHBORS;
-	}
-	public boolean swExist(Long sw)
-	{
-		int sz = NEIGHBORS.size();
-		//for(int i=0;i<sz;i++) 
-		return false;
 	}
 }

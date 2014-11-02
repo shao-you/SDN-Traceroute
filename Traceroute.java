@@ -20,11 +20,14 @@ import org.openflow.protocol.OFPort;
 import org.openflow.protocol.OFType;
 import org.openflow.protocol.action.OFAction;
 import org.openflow.protocol.action.OFActionOutput;
+import org.openflow.protocol.action.OFActionVirtualLanPriorityCodePoint;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 
 import net.floodlightcontroller.topology.ITopologyListener;
 import net.floodlightcontroller.topology.ITopologyService;
+import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.IPv4;
 import net.floodlightcontroller.routing.IRoutingService;
 import net.floodlightcontroller.routing.Link;
 import net.floodlightcontroller.core.FloodlightContext;
@@ -56,6 +59,9 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	protected Logger logger;
 	protected boolean flag = true;
 	Map<Long, swInfo>color;
+	
+	Integer broadcast = IPv4.toIPv4Address("255.255.255.255");
+	String mac = "ff:ff:ff:ff:ff:ff";
 	
 	@Override
 	public String getName() {
@@ -128,21 +134,41 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	public net.floodlightcontroller.core.IListener.Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) 
 	{
 		//if(flag) {flag=false;color = decideSWColor();setDefaultRules();}
-		
-		switch (msg.getType()) 
-		{
-	        case PACKET_IN:
-	        	//return Command.STOP;
-	        case PORT_STATUS:
-	        	//color = decideSWColor();setDefaultRules();
-	        	break;
-	        default:
-	            break;
-        }
-		//OFPacketIn pin = (OFPacketIn) msg;
-		//OFMatch match = new OFMatch();
-		//match.loadFromPacket(pin.getPacketData(), pin.getInPort());
+		OFPacketIn pin = (OFPacketIn) msg;
+		OFMatch match = new OFMatch();
+		match.loadFromPacket(pin.getPacketData(), pin.getInPort());
 
+		if(match.getDataLayerType()==Ethernet.TYPE_IPv4 && match.getDataLayerType()!=Ethernet.TYPE_ARP 
+				&& match.getNetworkDestination()!=broadcast && match.getDataLayerDestination()!=Ethernet.toMACAddress(mac)
+				&& (match.getNetworkProtocol()==IPv4.PROTOCOL_TCP || match.getNetworkProtocol()==IPv4.PROTOCOL_UDP || match.getNetworkProtocol()==IPv4.PROTOCOL_ICMP))
+			/*filter the customized production traffic*/
+		{
+			switch (msg.getType()) 
+			{
+		        case PACKET_IN:
+		    		byte current_PKT_color = match.getDataLayerVirtualLanPriorityCodePoint();
+		    		byte this_SW_color = -1;//no color
+		    		if(color.containsKey(sw.getId())) this_SW_color = color.get(sw.getId()).getCOLOR().byteValue();
+		    		else return Command.CONTINUE;//topology is not yet constructed completely
+		    		
+		    		if(current_PKT_color == this_SW_color) 
+		    		{
+		    			System.out.println("SW: "+sw.getId()+", Color is the same: "+this_SW_color);
+		    			return Command.CONTINUE;
+		    		}
+		    		else//packet out the packet without FLOW_MOD
+		    		{
+		    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), this_SW_color);
+		    			System.out.println("SW: "+sw.getId()+", Pkt Color: "+current_PKT_color+", SW Color: "+this_SW_color);
+		    			return Command.STOP;
+		    		}
+		        case PORT_STATUS:
+		        	//color = decideSWColor();setDefaultRules();
+		        	break;
+		        default:
+		            break;
+	        }
+		}
 		return Command.CONTINUE;
 	}
 	
@@ -219,7 +245,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 				mod.setFlags((short)(1 << 0));
 				
 				List<OFAction> actions = new ArrayList<OFAction>();
-				actions.add(new OFActionOutput(OFPort.OFPP_TABLE.getValue(),(short)0xFFFF));
+				actions.add(new OFActionOutput(OFPort.OFPP_CONTROLLER.getValue(),(short)0xFFFF));
 				
 				mod.setActions(actions);
 				mod.setLengthU(OFFlowMod.MINIMUM_LENGTH + OFActionOutput.MINIMUM_LENGTH);
@@ -247,7 +273,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
         }
     }
 	
-	private void pushPacket(IOFSwitch sw, OFMatch match, OFPacketIn pi, short outport)
+	private void pushPacket(IOFSwitch sw, OFMatch match, OFPacketIn pi, short outport, byte this_SW_color)
 	{
 	    if (pi == null) {
 	        return;
@@ -276,16 +302,12 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	                                            .getMessage(OFType.PACKET_OUT);
 
 	    // set actions
-	    List<OFAction> actions = new ArrayList<OFAction>();
+	    List<OFAction> actions = new ArrayList<OFAction>();//actions in list will be executed in order
+	    actions.add(new OFActionVirtualLanPriorityCodePoint(this_SW_color));
 	    actions.add(new OFActionOutput(outport, (short) 0xffff));
-		//actions.add(new OFActionDataLayerDestination(Ethernet.toMACAddress(mac_10_0_0_1)));
-		//actions.add(new OFActionNetworkLayerDestination(IPv4.toIPv4Address("10.0.0.1")));
-		//actions.add(new OFActionTransportLayerDestination((short)5134));
-		int length = OFActionOutput.MINIMUM_LENGTH            		
-		       // + OFActionNetworkLayerDestination.MINIMUM_LENGTH 
-	           // + OFActionDataLayerDestination.MINIMUM_LENGTH
-	           // + OFActionTransportLayerDestination.MINIMUM_LENGTH
-				;
+
+		int length = OFActionOutput.MINIMUM_LENGTH        
+			   + OFActionVirtualLanPriorityCodePoint.MINIMUM_LENGTH;
 	    po.setActions(actions)
 	      .setActionsLength((short)length);
 	    short poLength =
