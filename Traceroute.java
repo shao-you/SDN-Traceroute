@@ -28,6 +28,7 @@ import net.floodlightcontroller.topology.ITopologyListener;
 import net.floodlightcontroller.topology.ITopologyService;
 import net.floodlightcontroller.packet.Ethernet;
 import net.floodlightcontroller.packet.IPv4;
+import net.floodlightcontroller.restserver.IRestApiService;
 import net.floodlightcontroller.routing.IRoutingService;
 import net.floodlightcontroller.routing.Link;
 import net.floodlightcontroller.core.FloodlightContext;
@@ -49,16 +50,18 @@ import net.floodlightcontroller.linkdiscovery.ILinkDiscoveryService;
 
 public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwitchListener, ITopologyListener, IEntityClassListener {
  
-	protected IFloodlightProviderService floodlightProvider;
-	protected ICounterStoreService counterStore;
-	protected IDeviceService deviceManager;
-	protected IRoutingService routingEngine;
-	protected ILinkDiscoveryService linkManager;
-	protected ITopologyService topology;
+	protected static IFloodlightProviderService floodlightProvider;
+	protected static ICounterStoreService counterStore;
+	protected static IDeviceService deviceManager;
+	protected static IRoutingService routingEngine;
+	protected static ILinkDiscoveryService linkManager;
+	protected static ITopologyService topology;
+	protected static IRestApiService restApi;
 	
-	protected Logger logger;
+	protected static Logger logger;
 	protected boolean flag = true;
-	Map<Long, swInfo>color;
+	public static Map<Long, swInfo>color;
+	public static List<traceNode> traceRoute;
 	
 	Integer broadcast = IPv4.toIPv4Address("255.255.255.255");
 	String mac = "ff:ff:ff:ff:ff:ff";
@@ -102,7 +105,8 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 		    l.add(IRoutingService.class);
 	        l.add(IDeviceService.class);
 	        l.add(ILinkDiscoveryService.class);	
-	        l.add(ITopologyService.class);	        
+	        l.add(ITopologyService.class);
+	        l.add(IRestApiService.class);
 		return l;
 		// TODO Auto-generated method stub
 	}
@@ -110,13 +114,14 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	@Override
 	public void init(FloodlightModuleContext context)
 			throws FloodlightModuleException {
-		this.floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
-		this.counterStore = context.getServiceImpl(ICounterStoreService.class);
-		this.routingEngine = context.getServiceImpl(IRoutingService.class);
-		this.deviceManager = context.getServiceImpl(IDeviceService.class);
-		this.linkManager = context.getServiceImpl(ILinkDiscoveryService.class);
-		this.topology = context.getServiceImpl(ITopologyService.class);
-		this.logger = LoggerFactory.getLogger(Traceroute.class);
+		floodlightProvider = context.getServiceImpl(IFloodlightProviderService.class);
+		counterStore = context.getServiceImpl(ICounterStoreService.class);
+		routingEngine = context.getServiceImpl(IRoutingService.class);
+		deviceManager = context.getServiceImpl(IDeviceService.class);
+		linkManager = context.getServiceImpl(ILinkDiscoveryService.class);
+		topology = context.getServiceImpl(ITopologyService.class);
+		logger = LoggerFactory.getLogger(Traceroute.class);
+		restApi = context.getServiceImpl(IRestApiService.class);
 		// TODO Auto-generated method stub
 	}
  
@@ -127,6 +132,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 		floodlightProvider.addOFMessageListener(OFType.PORT_STATUS, this);
         floodlightProvider.addOFSwitchListener(this);
         topology.addListener(this);
+        restApi.addRestletRoutable(new DebugUIWebRoutable());
 		// TODO Auto-generated method stub
 	}
  
@@ -256,7 +262,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 		}
 	}
 	
-	public void writeOFMessagesToSwitch(long dpid, List<OFMessage> messages) 
+	private void writeOFMessagesToSwitch(long dpid, List<OFMessage> messages) 
 	{
     	IOFSwitch ofswitch = (IOFSwitch) floodlightProvider.getSwitch(dpid);
 
@@ -338,6 +344,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	    try {
 	        counterStore.updatePktOutFMCounterStoreLocal(sw, po);
 	        sw.write(po, null);
+	        sw.flush();
 	    } catch (IOException e) {
 	        logger.error("Failure writing packet out", e);
 	    }
