@@ -27,6 +27,7 @@ import org.slf4j.Logger;
 import net.floodlightcontroller.topology.ITopologyListener;
 import net.floodlightcontroller.topology.ITopologyService;
 import net.floodlightcontroller.packet.Ethernet;
+import net.floodlightcontroller.packet.IPacket;
 import net.floodlightcontroller.packet.IPv4;
 import net.floodlightcontroller.restserver.IRestApiService;
 import net.floodlightcontroller.routing.IRoutingService;
@@ -61,7 +62,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	protected static Logger logger;
 	protected boolean flag = true;
 	public static Map<Long, swInfo>color;
-	public static List<traceNode> traceRoute;
+	public static Map<Byte, List<traceNode>> traceRoute;
 	
 	Integer broadcast = IPv4.toIPv4Address("255.255.255.255");
 	String mac = "ff:ff:ff:ff:ff:ff";
@@ -133,6 +134,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
         floodlightProvider.addOFSwitchListener(this);
         topology.addListener(this);
         restApi.addRestletRoutable(new DebugUIWebRoutable());
+        traceRoute = new HashMap<Byte, List<traceNode>>();
 		// TODO Auto-generated method stub
 	}
  
@@ -144,10 +146,11 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 		OFMatch match = new OFMatch();
 		match.loadFromPacket(pin.getPacketData(), pin.getInPort());
 
-		if(match.getDataLayerType()==Ethernet.TYPE_IPv4 && match.getDataLayerType()!=Ethernet.TYPE_ARP 
+		/*if(match.getDataLayerType()==Ethernet.TYPE_IPv4 && match.getDataLayerType()!=Ethernet.TYPE_ARP 
 				&& match.getNetworkDestination()!=broadcast && match.getDataLayerDestination()!=Ethernet.toMACAddress(mac)
 				&& (match.getNetworkProtocol()==IPv4.PROTOCOL_TCP || match.getNetworkProtocol()==IPv4.PROTOCOL_UDP || match.getNetworkProtocol()==IPv4.PROTOCOL_ICMP))
-			/*filter the customized production traffic*/
+		*/
+		if(match.getDataLayerVirtualLanPriorityCodePoint() != (short)0)//filter the customized traffic
 		{
 			switch (msg.getType()) 
 			{
@@ -164,8 +167,18 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 		    		}
 		    		else//packet out the packet without FLOW_MOD
 		    		{
-		    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), this_SW_color);
+		    			//record the route here
+		    			Ethernet ethFrame = (Ethernet) new Ethernet().deserialize(pin.getPacketData(), 0, pin.getTotalLength());
+		    			IPv4 ipv4Packet = (IPv4) ethFrame.getPayload();
+		    			//System.out.println(pin.getLength()+"=="+pin.getTotalLength()+"=="+msg.getLength());
+		    			byte probeid = ipv4Packet.getTtl();
+		    			//System.out.println(probeid);
+		    			
+		    	    	traceNode Node = new traceNode(sw.getId(),match.getInputPort(),(short)0);
+		    	    	traceRoute.get(probeid).add(Node);
+		    	    	
 		    			System.out.println("SW: "+sw.getId()+", Pkt Color: "+current_PKT_color+", SW Color: "+this_SW_color);
+		    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), this_SW_color);
 		    			return Command.STOP;
 		    		}
 		        case PORT_STATUS:
@@ -235,7 +248,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 			{
 				Long neighbor_sw = neighbor.next();
 				Integer neighbor_color = color.get(neighbor_sw).getCOLOR();
-				//the default tag of (000) is reserved for the production traffic and is not used during the tag assignment process.
+				//the default tag of (000) is reserved for the production traffic and is not used during the tag assignment process
 			
 				OFMatch match = new OFMatch();
 				match.setDataLayerVirtualLanPriorityCodePoint(neighbor_color.byteValue());

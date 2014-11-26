@@ -16,6 +16,7 @@ public class traceNode extends JsonSerializer<traceNode> {
 	private Long DPID;
 	private Short InPort;
 	private Short OutPort;
+	private Boolean RepeatNode;
 	
 	public traceNode() {}// Do NOT delete this, it's required for the serializer
 	public traceNode(Long dpid, Short inport, Short outport)
@@ -23,6 +24,7 @@ public class traceNode extends JsonSerializer<traceNode> {
 		DPID = dpid;
 		InPort = inport;
 		OutPort = outport;
+		RepeatNode = false;
 	}
 	public Long getDPID()
 	{
@@ -36,7 +38,14 @@ public class traceNode extends JsonSerializer<traceNode> {
 	{
 		return OutPort;
 	}
-	
+	public Boolean getRepeatNode()
+	{
+		return RepeatNode;
+	}
+	public void setRepeatNode(Boolean repeatOrNot)
+	{
+		RepeatNode = repeatOrNot;
+	}
 	@Override
     public void serialize(traceNode swi, JsonGenerator jgen, SerializerProvider arg2)
             throws IOException, JsonProcessingException {
@@ -44,6 +53,7 @@ public class traceNode extends JsonSerializer<traceNode> {
     	    jgen.writeStringField("dpid",Long.toString(swi.getDPID()));
     	    jgen.writeNumberField("inport", swi.getInPort());
     	    jgen.writeNumberField("outport", swi.getOutPort());
+    	    jgen.writeBooleanField("repeatnode", swi.getRepeatNode());
 			jgen.writeEndObject();
     }
 
