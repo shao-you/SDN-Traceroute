@@ -26,7 +26,11 @@ public class ServiceChainResource extends ServerResource {
 		match.fromString(pkt.match);
 		//System.out.println(pkt.match);
 		//System.out.println(match.wildcards);
-		if(match.getNetworkDestinationMaskLen() == 0) match.setWildcards(match.getWildcards() & OFMatch.OFPFW_ALL_SANITIZED);
+		int src_sanitized = (OFMatch.OFPFW_ALL & ~OFMatch.OFPFW_NW_SRC_MASK) | OFMatch.OFPFW_NW_SRC_ALL;
+		int dst_sanitized = (OFMatch.OFPFW_ALL & ~OFMatch.OFPFW_NW_DST_MASK) | OFMatch.OFPFW_NW_DST_ALL;
+
+		if(match.getNetworkDestinationMaskLen() == 0) match.setWildcards(match.getWildcards() & dst_sanitized);
+		if(match.getNetworkSourceMaskLen() == 0) match.setWildcards(match.getWildcards() & src_sanitized);
 		//System.out.println(match.wildcards);
 		final int numOfCheckPoint = pkt.sw.size();
 		for(int i=0;i<numOfCheckPoint;i++) Traceroute.matchTable.get(pkt.sw.get(i)).put(pkt.probePktId, match);		

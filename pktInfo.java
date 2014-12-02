@@ -3,6 +3,7 @@ package net.floodlightcontroller.traceroute;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
 
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonParser;
@@ -14,7 +15,7 @@ public class pktInfo {
 	
 		/***********variable declaration***********/
 		String match = "";//store match field in string format
-		byte probePktId = (byte)((int)(Math.random()*256));//ran.nextInt();//max 256 probe packets, 1~255 (ttl=0 is not used)----------------
+		byte probePktId =(byte) (new Random().nextInt(255)+1);//(byte)((Math.random()*255)+1);//max 256 probe packets, 1~255 (ttl=0 is not used)
     	List<Long> sw = new ArrayList<Long>();
     	short inPort = 1;
     	//timestamp, service chain, loop, statistics

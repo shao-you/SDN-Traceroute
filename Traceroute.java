@@ -22,7 +22,6 @@ import org.openflow.protocol.OFType;
 import org.openflow.protocol.action.OFAction;
 import org.openflow.protocol.action.OFActionOutput;
 import org.openflow.protocol.action.OFActionVirtualLanPriorityCodePoint;
-import org.openflow.util.HexString;
 import org.openflow.util.U16;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
@@ -30,7 +29,6 @@ import org.slf4j.Logger;
 import net.floodlightcontroller.topology.ITopologyListener;
 import net.floodlightcontroller.topology.ITopologyService;
 import net.floodlightcontroller.packet.Ethernet;
-import net.floodlightcontroller.packet.IPacket;
 import net.floodlightcontroller.packet.IPv4;
 import net.floodlightcontroller.restserver.IRestApiService;
 import net.floodlightcontroller.routing.IRoutingService;
@@ -154,12 +152,30 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 		{
 			if(matchTable.get(sw.getId()).size() > 0)//may be a monitoring packet, ttl is used to identify monitoring pkt
 			{//only one pkt enters HERE//----------
+				 Ethernet ethFrame = (Ethernet) new Ethernet().deserialize(pin.getPacketData(), 0, pin.getTotalLength());//BasePacket, IPacket
+	    	     IPv4 ipv4Packet = (IPv4) ethFrame.getPayload();//BasePacket, IPacket
+	    		 byte monitorid = ipv4Packet.getTtl();
+				
 				Map<Byte, OFMatch> table= matchTable.get(sw.getId());
 				Iterator<Entry<Byte, OFMatch>> ite = table.entrySet().iterator();
 				while(ite.hasNext())
 				{
 					Entry<Byte, OFMatch> entry = ite.next(); 
-					if(entry.getValue().match(match)) 
+					if(entry.getValue().match(match) && entry.getKey() != monitorid)//first time
+					{
+				        //set ttl value
+				        //System.out.println("Original ttl: "+ipv4Packet.getTtl());
+		    			ipv4Packet.setTtl(entry.getKey()).setChecksum((short)0);
+				        //System.out.println("Marked ttl: "+ipv4Packet.getTtl());
+		    			pin.setPacketData(ethFrame.serialize());//write back to msg
+						
+		    			//pkt out with marked ttl
+						List<OFAction> actions = new ArrayList<OFAction>();//actions in list will be executed in order
+		    		    actions.add(new OFActionOutput(OFPort.OFPP_TABLE.getValue(), (short) 0xffff));
+		    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), actions, OFActionOutput.MINIMUM_LENGTH);
+		    		    return Command.STOP;
+					}
+					else if(entry.getValue().match(match) && entry.getKey() == monitorid)//second time
 					{
 						//System.out.println("wildcard value: "+entry.getValue().wildcards);
 						System.out.println("A monitoring packet is matched and forwarded to controller!");
@@ -179,19 +195,13 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 				        ite.remove();//------------
 				        
 				        //record checkpoint
-				        System.out.println("check point: "+sw.getId());
+				        System.out.println("check point: "+sw.getId()+", ttl: "+monitorid);
 				        
 				        //packet out without modification
 		    			List<OFAction> actions = new ArrayList<OFAction>();//actions in list will be executed in order
 		    		    actions.add(new OFActionOutput(OFPort.OFPP_TABLE.getValue(), (short) 0xffff));
 		    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), actions, OFActionOutput.MINIMUM_LENGTH);
 		    		    return Command.STOP;
-				        
-				        //set ttl value
-				        /*System.out.println("Original ttl: "+ipv4Packet.getTtl());
-		    			ipv4Packet.setTtl(entry.getKey()).setChecksum((short)0);
-				        System.out.println("Marked ttl: "+ipv4Packet.getTtl());
-		    			pin.setPacketData(ethFrame.serialize());//write back to msg*/
 					}
 				}
 			}//end of pkt monitoring
