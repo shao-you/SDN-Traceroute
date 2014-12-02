@@ -15,12 +15,15 @@ import org.openflow.protocol.OFFlowMod;
 import org.openflow.protocol.OFMatch;
 import org.openflow.protocol.OFMessage;
 import org.openflow.protocol.OFPacketIn;
+import org.openflow.protocol.OFPacketIn.OFPacketInReason;
 import org.openflow.protocol.OFPacketOut;
 import org.openflow.protocol.OFPort;
 import org.openflow.protocol.OFType;
 import org.openflow.protocol.action.OFAction;
 import org.openflow.protocol.action.OFActionOutput;
 import org.openflow.protocol.action.OFActionVirtualLanPriorityCodePoint;
+import org.openflow.util.HexString;
+import org.openflow.util.U16;
 import org.slf4j.LoggerFactory;
 import org.slf4j.Logger;
 
@@ -63,6 +66,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	protected boolean flag = true;
 	public static Map<Long, swInfo>color;
 	public static Map<Byte, List<traceNode>> traceRoute;
+	public static Map<Long, Map<Byte, OFMatch>> matchTable;
 	
 	Integer broadcast = IPv4.toIPv4Address("255.255.255.255");
 	String mac = "ff:ff:ff:ff:ff:ff";
@@ -135,59 +139,102 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
         topology.addListener(this);
         restApi.addRestletRoutable(new DebugUIWebRoutable());
         traceRoute = new HashMap<Byte, List<traceNode>>();
+        matchTable = new HashMap<Long, Map<Byte, OFMatch>>() ;
 		// TODO Auto-generated method stub
 	}
  
 	@Override
 	public net.floodlightcontroller.core.IListener.Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) 
 	{
-		//if(flag) {flag=false;color = decideSWColor();setDefaultRules();}
 		OFPacketIn pin = (OFPacketIn) msg;
 		OFMatch match = new OFMatch();
 		match.loadFromPacket(pin.getPacketData(), pin.getInPort());
-
-		/*if(match.getDataLayerType()==Ethernet.TYPE_IPv4 && match.getDataLayerType()!=Ethernet.TYPE_ARP 
-				&& match.getNetworkDestination()!=broadcast && match.getDataLayerDestination()!=Ethernet.toMACAddress(mac)
-				&& (match.getNetworkProtocol()==IPv4.PROTOCOL_TCP || match.getNetworkProtocol()==IPv4.PROTOCOL_UDP || match.getNetworkProtocol()==IPv4.PROTOCOL_ICMP))
-		*/
-		if(match.getDataLayerVirtualLanPriorityCodePoint() != (short)0)//filter the customized traffic
+		
+		if(msg.getType() == OFType.PACKET_IN && pin.getReason() == OFPacketInReason.ACTION)
 		{
-			switch (msg.getType()) 
+			if(matchTable.get(sw.getId()).size() > 0)//may be a monitoring packet, ttl is used to identify monitoring pkt
+			{//only one pkt enters HERE//----------
+				Map<Byte, OFMatch> table= matchTable.get(sw.getId());
+				Iterator<Entry<Byte, OFMatch>> ite = table.entrySet().iterator();
+				while(ite.hasNext())
+				{
+					Entry<Byte, OFMatch> entry = ite.next(); 
+					if(entry.getValue().match(match)) 
+					{
+						//System.out.println("wildcard value: "+entry.getValue().wildcards);
+						System.out.println("A monitoring packet is matched and forwarded to controller!");
+						
+						//remove flow entry in sw
+				        OFMessage fm = ((OFFlowMod) floodlightProvider.getOFMessageFactory()
+				            .getMessage(OFType.FLOW_MOD))
+				            .setPriority((short)(32767))//should be the same to the priority of 'entry.getValue()'
+				            .setMatch(entry.getValue())
+				            .setCommand(OFFlowMod.OFPFC_DELETE_STRICT)//OFPFC_DELETE, OFPFC_DELETE_STRICT
+				            .setOutPort(OFPort.OFPP_NONE)
+				            .setLength(U16.t(OFFlowMod.MINIMUM_LENGTH));
+				        
+				        List<OFMessage> messages = new ArrayList<OFMessage>();
+				        messages.add(fm);
+				        writeOFMessagesToSwitch(sw.getId(), messages);
+				        ite.remove();//------------
+				        
+				        //record checkpoint
+				        System.out.println("check point: "+sw.getId());
+				        
+				        //packet out without modification
+		    			List<OFAction> actions = new ArrayList<OFAction>();//actions in list will be executed in order
+		    		    actions.add(new OFActionOutput(OFPort.OFPP_TABLE.getValue(), (short) 0xffff));
+		    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), actions, OFActionOutput.MINIMUM_LENGTH);
+		    		    return Command.STOP;
+				        
+				        //set ttl value
+				        /*System.out.println("Original ttl: "+ipv4Packet.getTtl());
+		    			ipv4Packet.setTtl(entry.getKey()).setChecksum((short)0);
+				        System.out.println("Marked ttl: "+ipv4Packet.getTtl());
+		    			pin.setPacketData(ethFrame.serialize());//write back to msg*/
+					}
+				}
+			}//end of pkt monitoring
+		
+			/*if(match.getDataLayerType()==Ethernet.TYPE_IPv4 && match.getDataLayerType()!=Ethernet.TYPE_ARP 
+					&& match.getNetworkDestination()!=broadcast && match.getDataLayerDestination()!=Ethernet.toMACAddress(mac)
+					&& (match.getNetworkProtocol()==IPv4.PROTOCOL_TCP || match.getNetworkProtocol()==IPv4.PROTOCOL_UDP || match.getNetworkProtocol()==IPv4.PROTOCOL_ICMP))
+			*/
+			if(match.getDataLayerVirtualLanPriorityCodePoint() != (byte)0)//filter the customized traffic
 			{
-		        case PACKET_IN:
-		    		byte current_PKT_color = match.getDataLayerVirtualLanPriorityCodePoint();
-		    		byte this_SW_color = -1;//no color
-		    		if(color.containsKey(sw.getId())) this_SW_color = color.get(sw.getId()).getCOLOR().byteValue();
-		    		else return Command.CONTINUE;//topology is not yet constructed completely
-		    		
-		    		if(current_PKT_color == this_SW_color) 
-		    		{
-		    			System.out.println("SW: "+sw.getId()+", Color is the same: "+this_SW_color);
-		    			return Command.CONTINUE;
-		    		}
-		    		else//packet out the packet without FLOW_MOD
-		    		{
-		    			//record the route here
-		    			Ethernet ethFrame = (Ethernet) new Ethernet().deserialize(pin.getPacketData(), 0, pin.getTotalLength());
-		    			IPv4 ipv4Packet = (IPv4) ethFrame.getPayload();
-		    			//System.out.println(pin.getLength()+"=="+pin.getTotalLength()+"=="+msg.getLength());
-		    			byte probeid = ipv4Packet.getTtl();
-		    			//System.out.println(probeid);
-		    			
-		    	    	traceNode Node = new traceNode(sw.getId(),match.getInputPort(),(short)0);
-		    	    	traceRoute.get(probeid).add(Node);
-		    	    	
-		    			System.out.println("SW: "+sw.getId()+", Pkt Color: "+current_PKT_color+", SW Color: "+this_SW_color);
-		    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), this_SW_color);
-		    			return Command.STOP;
-		    		}
-		        case PORT_STATUS:
-		        	//color = decideSWColor();setDefaultRules();
-		        	break;
-		        default:
-		            break;
-	        }
-		}
+			    		byte current_PKT_color = match.getDataLayerVirtualLanPriorityCodePoint();
+			    		byte this_SW_color = -1;//no color
+			    		if(color.containsKey(sw.getId())) this_SW_color = color.get(sw.getId()).getCOLOR().byteValue();
+			    		else return Command.CONTINUE;//topology is not yet constructed completely
+			    		
+			    		if(current_PKT_color == this_SW_color) 
+			    		{
+			    			System.out.println("SW: "+sw.getId()+", Color is the same: "+this_SW_color);
+			    			return Command.CONTINUE;
+			    		}
+			    		else//packet out the packet without FLOW_MOD
+			    		{
+			    			//record the route here
+			    	        Ethernet ethFrame = (Ethernet) new Ethernet().deserialize(pin.getPacketData(), 0, pin.getTotalLength());//BasePacket, IPacket
+			    	        //System.out.println(pin.getLength()+"=="+pin.getTotalLength()+"=="+msg.getLength());
+			    	        IPv4 ipv4Packet = (IPv4) ethFrame.getPayload();//BasePacket, IPacket
+			    			byte probeid = ipv4Packet.getTtl();
+			    			//System.out.println(probeid);
+			    			
+			    	    	traceNode Node = new traceNode(sw.getId(),match.getInputPort(),(short)0);
+			    	    	traceRoute.get(probeid).add(Node);
+			    	    	
+			    			System.out.println("SW: "+sw.getId()+", Pkt Color: "+current_PKT_color+", SW Color: "+this_SW_color);
+			    			
+			    			List<OFAction> actions = new ArrayList<OFAction>();//actions in list will be executed in order
+			    			actions.add(new OFActionVirtualLanPriorityCodePoint(this_SW_color));
+			    		    actions.add(new OFActionOutput(OFPort.OFPP_TABLE.getValue(), (short) 0xffff));
+			    			pushPacket(sw, match, pin, OFPort.OFPP_TABLE.getValue(), actions, OFActionVirtualLanPriorityCodePoint.MINIMUM_LENGTH+OFActionOutput.MINIMUM_LENGTH);
+			    			return Command.STOP;
+			    		}
+			}//end of probe tracing
+			
+		}//end of OFPacketInReason.ACTION
 		return Command.CONTINUE;
 	}
 	
@@ -206,6 +253,11 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 			Set<Long> neighbor_SW = new HashSet<Long>();//If this set already contains the element, the call leaves the set unchanged and returns false.
 			Entry<Long, Set<Link>> entry = ite.next(); 
 			Long this_SW = entry.getKey();
+			if(!matchTable.containsKey(this_SW))//create table for each sw to store monitoring matches
+			{
+				Map<Byte,OFMatch> table = new HashMap<Byte, OFMatch>();
+				matchTable.put(this_SW, table);
+			}
 			Set<Link> neighbor = entry.getValue();
 			
 			Iterator<Link> ite2 = neighbor.iterator();
@@ -275,7 +327,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 		}
 	}
 	
-	private void writeOFMessagesToSwitch(long dpid, List<OFMessage> messages) 
+	public static void writeOFMessagesToSwitch(long dpid, List<OFMessage> messages)
 	{
     	IOFSwitch ofswitch = (IOFSwitch) floodlightProvider.getSwitch(dpid);
 
@@ -292,7 +344,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
         }
     }
 	
-	private void pushPacket(IOFSwitch sw, OFMatch match, OFPacketIn pi, short outport, byte this_SW_color)
+	private void pushPacket(IOFSwitch sw, OFMatch match, OFPacketIn pi, short outport, List<OFAction> actions, int actionLen)
 	{
 	    if (pi == null) {
 	        return;
@@ -320,15 +372,8 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	            (OFPacketOut) floodlightProvider.getOFMessageFactory()
 	                                            .getMessage(OFType.PACKET_OUT);
 
-	    // set actions
-	    List<OFAction> actions = new ArrayList<OFAction>();//actions in list will be executed in order
-	    actions.add(new OFActionVirtualLanPriorityCodePoint(this_SW_color));
-	    actions.add(new OFActionOutput(outport, (short) 0xffff));
-
-		int length = OFActionOutput.MINIMUM_LENGTH        
-			   + OFActionVirtualLanPriorityCodePoint.MINIMUM_LENGTH;
 	    po.setActions(actions)
-	      .setActionsLength((short)length);
+	      .setActionsLength((short)actionLen);
 	    short poLength =
 	            (short) (po.getActionsLength() + OFPacketOut.MINIMUM_LENGTH);
 
