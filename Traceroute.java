@@ -10,6 +10,7 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.List;
 import java.util.Set;
+import java.util.Timer;
 
 import org.openflow.protocol.OFFlowMod;
 import org.openflow.protocol.OFMatch;
@@ -137,19 +138,24 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
         topology.addListener(this);
         restApi.addRestletRoutable(new DebugUIWebRoutable());
         traceRoute = new HashMap<Byte, List<traceNode>>();
-        matchTable = new HashMap<Long, Map<Byte, OFMatch>>() ;
+        matchTable = new HashMap<Long, Map<Byte, OFMatch>>();
+        
+        //Timer time = new Timer(); // Instantiate Timer Object
+        //Scheduler st = new Scheduler(); // Instantiate SheduledTask class
+        //time.schedule(st, 0, 3000); // Create Repetitively task for every 1 sec
 		// TODO Auto-generated method stub
 	}
  
 	@Override
 	public net.floodlightcontroller.core.IListener.Command receive(IOFSwitch sw, OFMessage msg, FloodlightContext cntx) 
-	{
+	{//if(1==1) return Command.CONTINUE;
 		OFPacketIn pin = (OFPacketIn) msg;
 		OFMatch match = new OFMatch();
 		match.loadFromPacket(pin.getPacketData(), pin.getInPort());
 		
 		if(msg.getType() == OFType.PACKET_IN && pin.getReason() == OFPacketInReason.ACTION)
 		{
+			/**
 			if(matchTable.get(sw.getId()).size() > 0)//may be a monitoring packet, ttl is used to identify monitoring pkt
 			{//only one pkt enters HERE//----------
 				 Ethernet ethFrame = (Ethernet) new Ethernet().deserialize(pin.getPacketData(), 0, pin.getTotalLength());//BasePacket, IPacket
@@ -205,7 +211,9 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 					}
 				}
 			}//end of pkt monitoring
-		
+			**/
+			
+			
 			/*if(match.getDataLayerType()==Ethernet.TYPE_IPv4 && match.getDataLayerType()!=Ethernet.TYPE_ARP 
 					&& match.getNetworkDestination()!=broadcast && match.getDataLayerDestination()!=Ethernet.toMACAddress(mac)
 					&& (match.getNetworkProtocol()==IPv4.PROTOCOL_TCP || match.getNetworkProtocol()==IPv4.PROTOCOL_UDP || match.getNetworkProtocol()==IPv4.PROTOCOL_ICMP))
@@ -263,11 +271,13 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 			Set<Long> neighbor_SW = new HashSet<Long>();//If this set already contains the element, the call leaves the set unchanged and returns false.
 			Entry<Long, Set<Link>> entry = ite.next(); 
 			Long this_SW = entry.getKey();
+			/**
 			if(!matchTable.containsKey(this_SW))//create table for each sw to store monitoring matches
 			{
 				Map<Byte,OFMatch> table = new HashMap<Byte, OFMatch>();
 				matchTable.put(this_SW, table);
-			}
+			} 
+			**/
 			Set<Link> neighbor = entry.getValue();
 			
 			Iterator<Link> ite2 = neighbor.iterator();
@@ -421,7 +431,7 @@ public class Traceroute implements IOFMessageListener, IFloodlightModule, IOFSwi
 	@Override
 	public void switchAdded(long switchId) {
 		// TODO Auto-generated method stub
-		flag=true;color = decideSWColor();setDefaultRules();
+		//flag=true;color = decideSWColor();setDefaultRules();
 	}
 
 	@Override

@@ -11,8 +11,9 @@ public class DebugUIWebRoutable  implements RestletRoutable {
     public Restlet getRestlet(Context context) {
         Router router = new Router(context);
         router.attach("/traceroute/json", TracerouteResource.class);//post
-        router.attach("/servicechain/json", ServiceChainResource.class);//post, server push event
+        //router.attach("/servicechain/json", ServiceChainResource.class);//post
         router.attach("/swtag/json", SwTagResource.class);//get
+        //router.attach("/route/json", GetRouteResource.class);//get
         return router;
     }
 
